@@ -75,67 +75,51 @@ const verifyToken = (req, res, next) => {
 
 
 //IDENTIFICA EL EMISOR DE LA FACTURA
+
 app.post('/api/coordenadas', (req, res) => {
   const { base64, area_tabla, area_CABECERA } = req.body;
 
-  // Verificar si los datos necesarios están presentes
   if (!base64 || !area_tabla || !area_CABECERA) {
     return res.status(400).json({ error: 'Faltan datos en la solicitud.' });
   }
 
-  // Crear el objeto JSON con los tres parámetros
-  const jsonData = {
-    base64: base64,
-    area_tabla: area_tabla,
-    area_CABECERA: area_CABECERA
-  };
+  const jsonData = JSON.stringify({ base64, area_tabla, area_CABECERA });
 
-  console.log(area_CABECERA, "CABECERA", area_tabla, "TABLAA")
+  console.log("Datos enviados a Python:", jsonData);
 
-  // Convertir el objeto JSON a una cadena de texto
-  const jsonString = JSON.stringify(jsonData);
-
-  // Llamar al proceso Python
+  // Asegurar que se use Python 3
   const pythonProcess = spawn('python', ['files_python/cut2.py']);
 
-  // Enviar el JSON al script Python
-  pythonProcess.stdin.write(jsonString);  // Enviar el JSON string
-  pythonProcess.stdin.end();
-
   let result = '';
+  let errorOutput = '';
+
+  pythonProcess.stdin.write(jsonData);
+  pythonProcess.stdin.end();
 
   pythonProcess.stdout.on('data', (data) => {
     result += data.toString();
   });
 
   pythonProcess.stderr.on('data', (data) => {
-    console.error(`stderr: ${data}`);
-    if (!res.headersSent) {
-      return res.status(500).json({ error: 'Error en el script Python.' });
-    }
+    errorOutput += data.toString();
   });
 
   pythonProcess.on('close', (code) => {
-    if (code !== 0) {
-      console.error(`Proceso Python terminó con código ${code}`);
-      if (!res.headersSent) {
-        return res.status(500).json({ error: 'Error al ejecutar el script Python.' });
-      }
+    if (code !== 0 || errorOutput) {
+      console.error(`Error en Python (código ${code}):`, errorOutput);
+      return res.status(500).json({ error: 'Error en el script Python.', details: errorOutput });
     }
 
     try {
-      const jsonResult = JSON.parse(result); // Parsear la salida como JSON
-      if (!res.headersSent) {
-        return res.json(jsonResult); // Enviar la respuesta JSON al cliente
-      }
+      const jsonResult = JSON.parse(result);
+      res.json(jsonResult);
     } catch (error) {
-      console.error(`Error al parsear JSON: ${error}`);
-      if (!res.headersSent) {
-        return res.status(500).json({ error: 'Error al procesar la respuesta de Python.' });
-      }
+      console.error(`Error al parsear JSON de Python: ${error.message}`);
+      res.status(500).json({ error: 'Error al procesar la respuesta de Python.' });
     }
   });
 });
+
 
 
 

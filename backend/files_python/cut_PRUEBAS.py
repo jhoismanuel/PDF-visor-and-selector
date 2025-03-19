@@ -11,121 +11,61 @@ import os
 os.environ["PYTHONWARNINGS"] = "ignore"
 os.environ["JAVA_TOOL_OPTIONS"] = "-Dorg.apache.commons.logging.Log=org.apache.commons.logging.impl.NoOpLog"
 
+
+
 def extraer_datos_pdf(base64_pdf, area_tabla, area_cabecera):
-    """
-    Extrae datos de un PDF en base64 en base a coordenadas dadas y los devuelve en formato JSON.
-
-    Args:
-        base64_pdf (str): PDF codificado en base64.
-        area_tabla (list): Coordenadas de la tabla principal [y1, x1, y2, x2].
-        area_cabecera (list): Lista de coordenadas de la cabecera.
-
-    Returns:
-        dict: Respuesta en formato JSON con los datos extraídos o mensaje de error.
-    """
     try:
-        # Decodificar Base64 a binario
         pdf_bytes = base64.b64decode(base64_pdf)
         pdf_stream = io.BytesIO(pdf_bytes)
 
-        # Obtener número total de páginas del PDF
         pdf_reader = PyPDF2.PdfReader(pdf_stream)
         total_pages = len(pdf_reader.pages)
-        # print(type(total_pages))
-        # Extraer la tabla principal usando las coordenadas de 'area_tabla'
-        # print(len(area_tabla))
-        lista_dataframes=[]
-        for i in range(0,len(area_tabla)):
-            dfs = read_pdf(pdf_stream, area=area_tabla[i], stream=True, output_format="dataframe", pages=i)[0]
-            #sacar el encabezado y volverlo una fila
-            prim_fila=dfs.columns.tolist()
-            dfs.loc[-1]=prim_fila
-            dfs.index=dfs.index+1
-            dfs=dfs.sort_index()
+
+        lista_dataframes = []
+        for i in range(len(area_tabla)):
+            dfs = read_pdf(pdf_stream, area=area_tabla[i], stream=True, output_format="dataframe", pages=str(i+1))[0]
+            prim_fila = dfs.columns.tolist()
+            dfs.loc[-1] = prim_fila
+            dfs.index = dfs.index + 1
+            dfs = dfs.sort_index()
             lista_dataframes.append(dfs)
-            
-
-        dfs_con=pd.concat(lista_dataframes, ignore_index=True)
         
-        # print(dfs_con)
-
-        ########################################
-        # sacar el encabezado y volverlo una fila
-        # prim_fila=dfs_con.columns.tolist()
-        # # print(prim_fila)
-        # dfs_con.loc[-1]=prim_fila
-        # dfs_con.index=dfs_con.index+1
-        # dfs_con=dfs_con.sort_index()
-        # print(dfs_con)
+        dfs_con = pd.concat(lista_dataframes, ignore_index=True)
         
+        names_col = [f"columna {i}" for i in range(dfs_con.shape[1])]
+        dfs_con.columns = names_col
         
-        
-        names_col=[]
-        for i in range (0,dfs_con.shape[1]):
-            name_col = f"columna {i}"  # Concatenar la cadena y el número
-            names_col.append(name_col)
+        num_filas_buenas = dfs_con.iloc[:, 0].notnull().sum()
+        dfs_con["grupo"] = dfs_con.index // (dfs_con.shape[0] / num_filas_buenas)
+        dfs_con = dfs_con.fillna(" ")
+        dfs_con = dfs_con.groupby("grupo").agg(" ".join).reset_index(drop=True)
 
-        print(names_col)
-        print(dfs_con.shape)
-
-        dfs_con.columns=names_col
-        
-        ########################################
-        
-        ########################################
-        # #corregir datos que se dividen en mas de 2 filas IMPORTANT PROCESS
-        num_filas_buenas=dfs_con.iloc[:,0].notnull().sum()
-        
-        dfs_con["grupo"]=dfs_con.index//(dfs_con.shape[0]/num_filas_buenas)
-        # print(dfs_con["grupo"])
-        # print(dfs_con)
-
-        dfs_con=dfs_con.fillna(" ") #Para reemplazar los espacios NaN con " "
-
-        dfs_con=dfs_con.groupby("grupo").agg(" ".join).reset_index(drop=True)
-        # print(dfs_con)
-
-
-        ########################################
-        # Lista para almacenar datos de las coordenadas de la cabecera
         lista_de_columnas = []
         nombres_columnas = []
-        num_col_tabla=len(names_col)
+        num_col_tabla = len(names_col)
         for fijo in area_cabecera:
             df = read_pdf(pdf_stream, area=fijo, stream=True, output_format="dataframe", pages="all")
-            if df:
-                df = pd.DataFrame(df[0])
-                columnas = df.columns.tolist()
-            else:
-                columnas = [""]
-
+            columnas = df[0].columns.tolist() if df else [""]
             lista_de_columnas.append(columnas)
             nombres_columnas.append(f"Columna {num_col_tabla}")
-            num_col_tabla=num_col_tabla+1
+            num_col_tabla += 1
 
-        # Convertir a DataFrame y repetir para igualar las filas de `dfs_con`
-        df_extra = pd.DataFrame(lista_de_columnas).T  # Transponer para correcta alineación
-        n=dfs_con.shape[0] #numero de filas items para multiplicar los valores fijos
+        df_extra = pd.DataFrame(lista_de_columnas).T
+        n = dfs_con.shape[0]
         df_repetido = pd.DataFrame(np.repeat(df_extra.values, n, axis=0), columns=nombres_columnas)
-        # print(df_repetido)
-        # Concatenar con la tabla principal
-        df_concatenado = pd.concat([dfs_con, df_repetido], axis=1)
-        df_concatenado.fillna("", inplace=True)  # Reemplazar NaN por cadenas vacías
+        df_concatenado = pd.concat([dfs_con, df_repetido], axis=1).fillna("")
 
-        # Convertir DataFrame a JSON
-        json_response = {
+        return {
             "status": "success",
-            "message": "Datos extraidos correctamente",
+            "message": "Datos extraídos correctamente",
             "total_pages": total_pages,
             "resultado": df_concatenado.to_dict(orient="records")
         }
-
-        return json_response
     except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Error: {str(e)}"
-        }
+        return {"status": "error", "message": f"Error: {str(e)}"}
+
+
+
 
 # INICIALIZA LA FUNCION "PROCESAR_FACTURA" PARA SU USO
 # if __name__ == "__main__":
