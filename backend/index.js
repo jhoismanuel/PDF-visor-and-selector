@@ -11,7 +11,9 @@ const { spawn } = require('child_process');  // Usamos spawn en lugar de exec
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
 
 // Configura Multer para la subida de archivos
 const storage = multer.memoryStorage();
